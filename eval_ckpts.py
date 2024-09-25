@@ -2,7 +2,8 @@ import os
 
 ckpt_dir = 'RobotFlamingoDBG'
 
-ckpt_names = ['checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_4.pth', 'checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_3.pth', 'checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_2.pth']
+# ckpt_names = ['checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_4.pth', 'checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_3.pth', 'checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_2.pth']
+ckpt_names = ['checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_3b_4.pth']
 print(ckpt_names)
 for ckpt_name in ckpt_names:
     use_gripper = 1 if 'gripper' in ckpt_name else 0

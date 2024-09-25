@@ -3,7 +3,9 @@
 import argparse
 import glob
 import os
+import sys
 import random
+sys.path.append("/home/xyli/Code/RoboFlamingo")
 from robot_flamingo.eval.eval_utils import eval_one_epoch_calvin_ddp
 from torch.distributed.elastic.multiprocessing.errors import record
 
@@ -12,6 +14,7 @@ os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
 import numpy as np
 import torch
 import wandb
+sys.path.append("/home/xyli/Code/RoboFlamingo/open_flamingo")
 from open_flamingo.train.distributed import init_distributed_device, world_info_from_env
 from torch.nn.parallel import DistributedDataParallel as DDP
 

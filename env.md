@@ -1,0 +1,10 @@
+- download calvin
+  - get calvin env
+    - --use-pep517
+    - upgrade networkx to 2.6 (not compatible with numpy)
+  - get calvin dataset
+- download RoboFlamingo
+  - get checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_3b_4.pth
+  - get open_flamingo/ckpts/OpenFlamingo-3B-vitl-mpt1b/checkpoint.pt
+  - pip install requirements.txt
+  - install other modules needed

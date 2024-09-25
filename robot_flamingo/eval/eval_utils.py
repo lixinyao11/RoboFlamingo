@@ -39,7 +39,6 @@ from robot_flamingo.data.data import preprocess_image, preprocess_text_calvin
 from robot_flamingo.utils import world_to_tcp_frame, tcp_to_world_frame
 import functools
 os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
-import pyrender
 logger = logging.getLogger(__name__)
 
 EP_LEN = 360
@@ -355,6 +354,8 @@ class ModelWrapper(CalvinBaseModel):
         return action
 
 
+ROOT_PATH = "/home/xyli/Code/RoboFlamingo"
+
 def evaluate_policy(model, env, epoch, calvin_conf_path, eval_log_dir=None, debug=False, create_plan_tsne=False, diverse_inst=False):
     """
     Run this function to evaluate a model on the CALVIN challenge.
@@ -374,7 +375,7 @@ def evaluate_policy(model, env, epoch, calvin_conf_path, eval_log_dir=None, debu
     task_cfg = OmegaConf.load(conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml")
     task_oracle = hydra.utils.instantiate(task_cfg)
     if diverse_inst:
-        with open('/mnt/bn/robotics/lxh/robot-flamingo/enrich_lang_annotations.json', 'r') as f:
+        with open(os.path.join(ROOT_PATH, 'enrich_lang_annotations.json'), 'r') as f:
             val_annotations = json.load(f)
     else:
         val_annotations = OmegaConf.load(conf_dir / "annotations/new_playtable_validation.yaml")
@@ -420,19 +421,20 @@ def evaluate_policy_ddp(model, env, epoch, calvin_conf_path, eval_log_dir=None, 
     Returns:
         Dictionary with results
     """
+    print("evaluate_policy_ddp")
     conf_dir = Path(calvin_conf_path)
     task_cfg = OmegaConf.load(conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml")
     task_oracle = hydra.utils.instantiate(task_cfg)
     
     # val_annotations = OmegaConf.load(conf_dir / "annotations/new_playtable_validation.yaml")
     if diverse_inst:
-        with open('/mnt/bn/robotics/lxh/robot-flamingo/lang_annotation_cache.json', 'r') as f:
+        with open(os.path.join(ROOT_PATH, 'lang_annotation_cache.json'), 'r') as f:
             val_annotations = json.load(f)
     else:
         val_annotations = OmegaConf.load(conf_dir / "annotations/new_playtable_validation.yaml")
 
     eval_log_dir = get_log_dir(eval_log_dir)
-    with open('/mnt/bn/robotics/lxh/robot-flamingo/eval_sequences.json', 'r') as f:
+    with open(os.path.join(ROOT_PATH, 'eval_sequences.json'), 'r') as f:
         eval_sequences = json.load(f)
     device_num = int(torch.distributed.get_world_size())
     device_id = torch.distributed.get_rank()
@@ -486,6 +488,7 @@ def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence, va
     """
     Evaluates a sequence of language instructions.
     """
+    print("evaluate_sequence")
     robot_obs, scene_obs = get_env_state_for_initial_condition(initial_state)
     env.reset(robot_obs=robot_obs, scene_obs=scene_obs)
 
@@ -580,7 +583,7 @@ def eval_one_epoch_calvin(args, model, dataset_path, image_processor, tokenizer,
 
 
 def eval_one_epoch_calvin_ddp(args, model, dataset_path, image_processor, tokenizer, eval_log_dir=None, debug=False, future_act_len=-1, reset=False, diverse_inst=False):
-
+    print("eval_one_epoch_calvin_ddp")
     env = make_env(dataset_path)
     cast_dtype = get_cast_dtype(args.precision)
     hist_len = None
@@ -667,7 +670,7 @@ def main():
 
 def generate_zero_shot_instr():
     random.seed(123)
-    with open('/mnt/bn/robotics/lxh/robot-flamingo/enrich_lang_annotations.json', 'r') as f:
+    with open(os.path.join(ROOT_PATH, 'enrich_lang_annotations.json'), 'r') as f:
             val_annotations = json.load(f)
     eval_sequences = get_sequences(NUM_SEQUENCES)
     
@@ -677,12 +680,12 @@ def generate_zero_shot_instr():
         for subtask_i, subtask in enumerate(eval_sequence):
             res.append(random.choice(val_annotations[subtask]))
         all_res.append(res)
-    with open('/mnt/bn/robotics/lxh/robot-flamingo/lang_annotation_cache.json', 'w') as f:
+    with open(os.path.join(ROOT_PATH, 'lang_annotation_cache.json'), 'w') as f:
         json.dump(all_res, f, indent=1)
 
 
 def save_sequences():
     random.seed(123)
     eval_sequences = get_sequences(NUM_SEQUENCES)
-    with open('/mnt/bn/robotics/lxh/robot-flamingo/eval_sequences.json', 'w') as f:
+    with open(os.path.join(ROOT_PATH, 'eval_sequences.json'), 'w') as f:
         json.dump(eval_sequences, f)

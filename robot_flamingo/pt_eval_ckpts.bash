@@ -14,13 +14,13 @@ sudo apt-get -y install meson
 sudo apt-get -y build-dep mesa
 
 # !!! Set for your own path
-calvin_dataset_path='calvin_data/task_ABCD_D'
+calvin_dataset_path='/home/xyli/Code/calvin/dataset/calvin_debug_dataset'
 # calvin_conf_path
-calvin_conf_path="calvin/calvin_models/conf"
+calvin_conf_path="/home/xyli/Code/calvin/calvin_models/conf"
 # language model path
-lm_path=''
+lm_path='anas-awadalla/mpt-1b-redpajama-200b'
 # tokenizer path
-tokenizer_path=''
+tokenizer_path='anas-awadalla/mpt-1b-redpajama-200b'
 
 evaluate_from_checkpoint=$1
 log_file=$2
@@ -30,7 +30,7 @@ fusion_mode=$5
 window_size=$6
 export MESA_GL_VERSION_OVERRIDE=4.1
 echo logging to ${log_file}
-node_num=8
+node_num=2
 
 if [ ${use_gripper} -eq 1 ] && [ ${use_state} -eq 1 ]
 then
