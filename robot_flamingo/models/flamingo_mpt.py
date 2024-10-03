@@ -88,7 +88,7 @@ class MPTFlamingo(nn.Module):
             self.lang_dim = lang_encoder.config.hidden_size
 
         self.residual = residual
-        print(self.vis_dim, self.lang_dim)
+        print(self.vis_dim, self.lang_dim)  # 1024 2048
         print(lang_encoder.config)
         if not debug:
             if 'llama' in llm:
@@ -222,7 +222,7 @@ class MPTFlamingo(nn.Module):
                     if self.fusion_mode == 'pre':
                         self._encode_multi_vision_pre_fusion(vision_x, vision_gripper)
                     elif self.fusion_mode == 'post':
-                        self._encode_multi_vision_post_fusion(vision_x, vision_gripper)
+                        _, vision_x, pooled = self._encode_multi_vision_post_fusion(vision_x, vision_gripper)
                     elif self.fusion_mode == 'vit_concat':
                         self._encode_history_vision_fc_post(vision_x, vision_gripper)
         
@@ -232,13 +232,14 @@ class MPTFlamingo(nn.Module):
             past_key_values=past_key_values,
             use_cache=use_cache,
             output_hidden_states=True
-        )
+        )  # CausalLMOutputWithPast
+        input_embeddings = self.lang_encoder.get_input_embeddings()(lang_x)
 
-        output_hs = output.hidden_states[-1]
+        output_hs = output.hidden_states[-1]  # 提取最后一层的hidden_states
         output_hs = self.lm_head(output_hs, state_tensor=state_tensor, return_feature=return_feature)
-        output.logits = output_hs
+        output.logits = output_hs  # 模型的输出 (action)
         
-        return output
+        return output, vision_x, pooled, input_embeddings
 
     def _encode_vision_x(self, vision_x: torch.Tensor):
         """
@@ -286,9 +287,9 @@ class MPTFlamingo(nn.Module):
 
         vision_x = rearrange(vision_x, "b T F c h w -> (b T F) c h w")
         with torch.no_grad():
-            vision_x = self.vision_encoder.visual(vision_x)[1]
+            (pooled, vision_x) = self.vision_encoder.visual(vision_x)
         vision_x = rearrange(vision_x, "(b T F) v d -> b T F v d", b=b, T=T, F=F)
-        return vision_x
+        return vision_x, pooled
 
     def _encode_multi_vision_pre_fusion(self, vision_rgb: torch.Tensor, vision_gripper: torch.Tensor, state_tensor=None):
         """
@@ -327,8 +328,10 @@ class MPTFlamingo(nn.Module):
 
         rearrange code based on https://github.com/dhansmair/flamingo-mini
         """
-        vision_rgb = self._encode_vision(vision_rgb)
-        vision_gripper = self._encode_vision(vision_gripper)
+        vision_rgb, pooled_rgb = self._encode_vision(vision_rgb)
+        vision_gripper, pooled_gripper = self._encode_vision(vision_gripper)
+        vision_x_original = torch.cat([vision_rgb, vision_gripper], dim=3)  # (b, T, F, v, D)
+        pooled = torch.cat([pooled_rgb, pooled_gripper], dim=-1)  # 768*2
         vision_rgb = self.perceiver(vision_rgb)
         if self.sep_resampler:
             vision_gripper = self.perceiver_gripper(vision_gripper)
@@ -342,7 +345,7 @@ class MPTFlamingo(nn.Module):
         for layer in self.lang_encoder._get_decoder_layers():
             layer.condition_vis_x(vision_x)
 
-        return vision_x
+        return vision_x, vision_x_original, pooled
 
     def _encode_multi_vision_two_way(self, vision_rgb: torch.Tensor, vision_gripper: torch.Tensor, state_tensor=None):
         """

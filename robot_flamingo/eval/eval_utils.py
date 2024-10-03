@@ -37,6 +37,7 @@ from tqdm.auto import tqdm
 from calvin_env.envs.play_table_env import get_env
 from robot_flamingo.data.data import preprocess_image, preprocess_text_calvin
 from robot_flamingo.utils import world_to_tcp_frame, tcp_to_world_frame
+from eval_logger import EvaluationLogger
 import functools
 os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
 logger = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ class ModelWrapper(CalvinBaseModel):
         self.feature_cache = None
         self.dt_feat_cache = []
         self.fusion_mode = self.model.module.fusion_mode
+        self.logger = EvaluationLogger()
         
         if use_diff:
             self.diffusion_model = None
@@ -311,8 +313,18 @@ class ModelWrapper(CalvinBaseModel):
                     mask = mask.repeat(2, 1)
                     action = self.model(vision_x=vision_x, lang_x=text_x, attention_mask=mask, state_tensor = state, return_feature=True)
                 else:
-                    action = self.model(vision_x=image_x, lang_x=text_x, attention_mask=mask, vision_gripper = gripper, state_tensor = state, return_feature=True)
+                    action, vision, pooled, text_embedding = self.model(vision_x=image_x, lang_x=text_x, attention_mask=mask, vision_gripper = gripper, state_tensor = state, return_feature=True)
                 
+                # self.logger.log_step(obs["rgb_obs"]['rgb_static'], obs["rgb_obs"]['rgb_gripper'], obs['robot_obs'], 
+                #                      np.concatenate([action.logits[0].detach().cpu().numpy(), action.logits[1].detach().cpu().numpy()], axis=2), 
+                #                      action.hidden_states[-1].detach().cpu().numpy())
+                if torch.sum(mask) != mask.numel():
+                    print("mask: ", mask)
+                self.logger.log_step(vision.detach().cpu().numpy(), pooled.detach().cpu().numpy(), obs['robot_obs'], 
+                                     text_embedding.detach().cpu().numpy(), mask.detach().cpu().numpy(),
+                                     np.concatenate([action.logits[0].detach().cpu().numpy(), action.logits[1].detach().cpu().numpy()], axis=2), 
+                                     action.hidden_states[-1].detach().cpu().numpy())
+
                 if self.model.module.pad_length != -1:
                     if self.feature_cache is None:
                         self.feature_cache = action.logits[-1]
@@ -457,6 +469,7 @@ def evaluate_policy_ddp(model, env, epoch, calvin_conf_path, eval_log_dir=None, 
                 " ".join([f"{i + 1}/5 : {v * 100:.1f}% |" for i, v in enumerate(count_success(results))]) + "|"
             )
         local_sequence_i += 1
+    print("evaluated all sequences")
     def merge_multi_list(res):
         tmp = []
         for l in res:
@@ -471,15 +484,17 @@ def evaluate_policy_ddp(model, env, epoch, calvin_conf_path, eval_log_dir=None, 
 
     eval_sequences = extract_iter_from_tqdm(eval_sequences)
 
-    res_tup = [(res, eval_seq) for res, eval_seq in zip(results, eval_sequences)]
-    all_res_tup = [copy.deepcopy(res_tup) for _ in range(device_num)] if torch.distributed.get_rank() == 0 else None
-    torch.distributed.gather_object(res_tup, all_res_tup, dst=0)
+    # res_tup = [(res, eval_seq) for res, eval_seq in zip(results, eval_sequences)]
+    # all_res_tup = [copy.deepcopy(res_tup) for _ in range(device_num)] if torch.distributed.get_rank() == 0 else None
+    # torch.distributed.barrier()
+    # print("gather results")
+    # torch.distributed.gather_object(res_tup, all_res_tup, dst=0)
 
-    if torch.distributed.get_rank() == 0:
-        res_tup_list = merge_multi_list(all_res_tup)
-        res_list = [_[0] for _ in res_tup_list]
-        eval_seq_list = [_[1] for _ in res_tup_list]
-        print_and_save(res_list, eval_seq_list, eval_log_dir, epoch)
+    # if torch.distributed.get_rank() == 0:
+    #     res_tup_list = merge_multi_list(all_res_tup)
+    #     res_list = [_[0] for _ in res_tup_list]
+    #     eval_seq_list = [_[1] for _ in res_tup_list]
+    #     print_and_save(res_list, eval_seq_list, eval_log_dir, epoch)
 
     return results
 
@@ -491,6 +506,7 @@ def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence, va
     print("evaluate_sequence")
     robot_obs, scene_obs = get_env_state_for_initial_condition(initial_state)
     env.reset(robot_obs=robot_obs, scene_obs=scene_obs)
+    model.logger.start_sequence()
 
     success_counter = 0
     if debug:
@@ -507,7 +523,9 @@ def evaluate_sequence(env, model, task_checker, initial_state, eval_sequence, va
         if success:
             success_counter += 1
         else:
+            model.logger.save_sequence()
             return success_counter
+    model.logger.save_sequence()
     return success_counter
 
 
@@ -515,6 +533,7 @@ def rollout(env, model, task_oracle, subtask, val_annotations, plans, debug, eva
     """
     Run the actual rollout on one subtask (which is one natural language instruction).
     """
+    print("rollout")
     planned_actions = []
     if debug:
         print(f"{subtask} ", end="")
@@ -531,6 +550,7 @@ def rollout(env, model, task_oracle, subtask, val_annotations, plans, debug, eva
     if '\u2019' in lang_annotation:
         lang_annotation.replace('\u2019', '\'')
     model.reset()
+    model.logger.start_rollout(subtask_i, lang_annotation)
     start_info = env.get_info()
 
     if debug:
@@ -567,11 +587,13 @@ def rollout(env, model, task_oracle, subtask, val_annotations, plans, debug, eva
                 print(colored("success", "green"), end=" ")
                 img_clip = ImageSequenceClip(img_queue, fps=30)
                 img_clip.write_gif(os.path.join(eval_log_dir, f'{sequence_i}-{subtask_i}-{subtask}-succ.gif'), fps=30)
+            model.logger.end_rollout(1)
             return True
     if debug:
         print(colored("fail", "red"), end=" ")
         img_clip = ImageSequenceClip(img_queue, fps=30)
         img_clip.write_gif(os.path.join(eval_log_dir, f'{sequence_i}-{subtask_i}-{subtask}-fail.gif'), fps=30)
+    model.logger.end_rollout(0)
     return False
 
 def eval_one_epoch_calvin(args, model, dataset_path, image_processor, tokenizer, future_act_len=-1):

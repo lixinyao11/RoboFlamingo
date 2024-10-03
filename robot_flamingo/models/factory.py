@@ -150,7 +150,7 @@ def create_model_and_transforms(
         # Set the `init_weights` parameter to `False` to prevent the model from loading the pretrained weights.
         lang_encoder.init_weights(False)
     else:
-        print(lang_encoder_path)
+        print("lang_encoder_path:", lang_encoder_path)
         lang_encoder = AutoModelForCausalLM.from_pretrained(
             lang_encoder_path, local_files_only=use_local_files, trust_remote_code=True
         )

@@ -38,3 +38,7 @@ lang_simi*
 *plot.py
 void.py
 test*.py
+logs_*
+data
+student_model/logs
+student_model/ckpts

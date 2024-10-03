@@ -7,4 +7,15 @@
   - get checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_3b_4.pth
   - get open_flamingo/ckpts/OpenFlamingo-3B-vitl-mpt1b/checkpoint.pt
   - pip install requirements.txt
+  - pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+  - pip install torchaudio==0.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+  - pip install torchvision==0.13.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
   - install other modules needed
+    - pip install braceexpand webdataset h5py
+    - pip install pytorch3d
+    - pip install einops einops_exts
+    - pip install open_clip_torch
+  - clone urdfpy (conflict with numpy)
+    - gh pr checkout 42
+    - pip install -e .
+  - pip install networkx==2.6 (conflict with numpy)

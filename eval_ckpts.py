@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 ckpt_dir = 'RobotFlamingoDBG'
 
@@ -10,7 +11,9 @@ for ckpt_name in ckpt_names:
     use_state = 1 if 'state' in ckpt_name else 0
     ckpt_path = os.path.join(ckpt_dir, ckpt_name)
     os.makedirs('logs_new', exist_ok=True)
-    log_file = 'logs_new/evaluate_{}.log'.format(ckpt_name.split('.')[0])
+    current_time = current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # log_file = 'logs_new/evaluate_{}.log'.format(ckpt_name.split('.')[0])
+    log_file = f'logs_new/evaluate_{current_time}.log'
     ckpt_ix = ckpt_names.index(ckpt_name)
     print('evaluating {}/{} checkpoint'.format(ckpt_ix+1, len(ckpt_names)))
     fusion_mode = 'pre'

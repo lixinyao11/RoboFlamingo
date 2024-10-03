@@ -4,6 +4,7 @@ import argparse
 import copy
 import glob
 import os
+import sys
 import random
 from collections import OrderedDict
 import numpy as np
@@ -13,7 +14,9 @@ from huggingface_hub import hf_hub_download
 import itertools
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+sys.path.append("/home/xyli/Code/RoboFlamingo")
 from robot_flamingo.data.data import get_data
+sys.path.append("/home/xyli/Code/RoboFlamingo/open_flamingo")
 from open_flamingo.train.distributed import init_distributed_device, world_info_from_env
 from train_utils import get_checkpoint, train_one_epoch_calvin, train_one_epoch_calvin_diff, train_one_epoch_calvin_cotrain, train_one_epoch_calvin_two_way, \
 get_ckpt_name, get_ckpt_name_pattern
@@ -387,6 +390,21 @@ def main():
         calvin_dataset = get_data(args, image_processor, tokenizer, "real")
     else:
         calvin_dataset = get_data(args, image_processor, tokenizer, "calvin")
+
+    # item of dataset:
+    # 'robot_obs', 'rgb_obs', 'depth_obs', 'actions', 'state_info', 'use_for_aux_lang_loss', 'lang', 'idx'
+    # compose of batch data (processed by dataset.collator):
+    # image_tensors, (text_tensors, attention_mask), action_tensors, gripper_tensors, state_tensors, robot_obs
+
+    for batch in iter(calvin_dataset.dataloader):
+        print("images shape: ", batch[0].shape)  # [6, 12, 3, 224, 224]
+        print("input_ids shape: ", batch[1][0].shape)  # [6, 13] or [6, 11]
+        images = (batch[0].unsqueeze(2).unsqueeze(2))
+        input_ids = batch[1][0].unsqueeze(1).repeat(1, images.shape[1], 1)
+        print("images shape: ", images.shape)  # [6, 12, 1, 1, 3, 224, 224]
+        print("input_ids shape: ", input_ids.shape)  # [6, 12, 13] or [6, 12, 11]
+
+    return
     
     if args.co_train:
         coco_loader = get_data(args, image_processor, tokenizer, "coco")
