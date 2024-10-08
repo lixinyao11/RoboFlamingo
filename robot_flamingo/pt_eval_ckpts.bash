@@ -3,15 +3,15 @@
 export EVALUTION_ROOT=$(pwd)
 
 # Install dependency for calvin
-sudo apt-get -y install libegl1-mesa libegl1
-sudo apt-get -y install libgl1
+# sudo apt-get -y install libegl1-mesa libegl1
+# sudo apt-get -y install libgl1
 
-sudo apt-get update -y -qq
-sudo apt-get install -y -qq libegl1-mesa libegl1-mesa-dev
+# sudo apt-get update -y -qq
+# sudo apt-get install -y -qq libegl1-mesa libegl1-mesa-dev
 
-sudo apt install -y mesa-utils libosmesa6-dev llvm
-sudo apt-get -y install meson
-sudo apt-get -y build-dep mesa
+# sudo apt install -y mesa-utils libosmesa6-dev llvm
+# sudo apt-get -y install meson
+# sudo apt-get -y build-dep mesa
 
 # !!! Set for your own path
 calvin_dataset_path='/home/xyli/Code/calvin/dataset/calvin_debug_dataset'

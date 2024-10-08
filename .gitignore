@@ -14,7 +14,6 @@
 logs/*
 *.txt
 *512.json
-*log*
 *vis*
 *.pth
 RobotFlamingoDBG*
