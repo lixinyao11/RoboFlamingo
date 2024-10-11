@@ -396,16 +396,14 @@ def main():
     # compose of batch data (processed by dataset.collator):
     # image_tensors, (text_tensors, attention_mask), action_tensors, gripper_tensors, state_tensors, robot_obs
 
-    for batch in iter(calvin_dataset.dataloader):
-        print("images shape: ", batch[0].shape)  # [6, 12, 3, 224, 224]
-        print("input_ids shape: ", batch[1][0].shape)  # [6, 13] or [6, 11]
-        images = (batch[0].unsqueeze(2).unsqueeze(2))
-        input_ids = batch[1][0].unsqueeze(1).repeat(1, images.shape[1], 1)
-        print("images shape: ", images.shape)  # [6, 12, 1, 1, 3, 224, 224]
-        print("input_ids shape: ", input_ids.shape)  # [6, 12, 13] or [6, 12, 11]
+    # for batch in iter(calvin_dataset.dataloader):
+    #     print("images shape: ", batch[0].shape)  # [6, 12, 3, 224, 224]
+    #     print("input_ids shape: ", batch[1][0].shape)  # [6, 13] or [6, 11]
+    #     images = (batch[0].unsqueeze(2).unsqueeze(2))
+    #     input_ids = batch[1][0].unsqueeze(1).repeat(1, images.shape[1], 1)
+    #     print("images shape: ", images.shape)  # [6, 12, 1, 1, 3, 224, 224]
+    #     print("input_ids shape: ", input_ids.shape)  # [6, 12, 13] or [6, 12, 11]
 
-    return
-    
     if args.co_train:
         coco_loader = get_data(args, image_processor, tokenizer, "coco")
         vqa_loader = get_data(args, image_processor, tokenizer, "vqa")

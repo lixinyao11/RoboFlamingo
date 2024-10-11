@@ -6,6 +6,7 @@ ckpt_dir = 'RobotFlamingoDBG'
 # ckpt_names = ['checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_4.pth', 'checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_3.pth', 'checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_9b_2.pth']
 ckpt_names = ['checkpoint_gripper_post_hist_1_aug_10_4_traj_cons_ws_12_mpt_3b_4.pth']
 print(ckpt_names)
+student_ckpt = '/Share/xyli/logs/flamingo/ckpts/test_run_gpt_ddp/model_epoch_49.ckpt'
 for ckpt_name in ckpt_names:
     use_gripper = 1 if 'gripper' in ckpt_name else 0
     use_state = 1 if 'state' in ckpt_name else 0
@@ -30,5 +31,5 @@ for ckpt_name in ckpt_names:
     node_num = 8
     if 'mpt_9b' in ckpt_name:
         node_num = 5
-    os.system('bash robot_flamingo/pt_eval_ckpts.bash {} {} {} {} {} {} {}'.format(ckpt_path, log_file, use_gripper, use_state, fusion_mode, window_size, node_num))
+    os.system('bash robot_flamingo/pt_eval_ckpts.bash {} {} {} {} {} {} {} {}'.format(ckpt_path, log_file, use_gripper, use_state, fusion_mode, window_size, node_num, student_ckpt))
 

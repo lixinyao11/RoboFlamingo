@@ -7,6 +7,7 @@ import sys
 import random
 sys.path.append("/home/xyli/Code/RoboFlamingo")
 from robot_flamingo.eval.eval_utils import eval_one_epoch_calvin_ddp
+from student_model.model import GPT2FeaturePrediction
 from torch.distributed.elastic.multiprocessing.errors import record
 
 # os.environ['PYOPENGL_PLATFORM'] = 'egl'
@@ -99,6 +100,7 @@ def main():
         help="path to checkpoint to evaluate , this should contain model",
         default=None,
     )
+    parser.add_argument("--eval_student_ckpt", type=str, default=None)
     # data args
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--train_num_samples_calvin", type=int, default=100)
@@ -289,6 +291,11 @@ def main():
         default=False,
         action="store_true"
     )
+    parser.add_argument(
+        "--collect_data",
+        default=False,
+        action="store_true"
+    )
     parser.add_argument("--global_latent", type=int, default=1)
     parser.add_argument("--save_every_iter", type=int, default=-1)
     parser.add_argument("--pad_length", type=int, default=-1)
@@ -440,11 +447,34 @@ def main():
     checkpoint = torch.load(args.evaluate_from_checkpoint, map_location="cpu")
     ddp_model.load_state_dict(checkpoint["model_state_dict"], False)  # 只保存了求梯度的部分
 
+    if args.eval_student_ckpt :
+        config = {
+            "num_epochs": 50,
+            "ckpt_dir": "/Share/xyli/logs/flamingo/ckpts",
+            "vision_dim": 1024,
+            "vision_pool_dim": 1536,
+            "embed_dim": 2048,
+            "feat_dim": 2048,
+            "lr": 1e-4,
+            "batch_size": 6,
+            "exptid": "test_run_gpt_ddp",
+            "data_size": 100,
+            "iterable_data": True,
+            "weight_decay": 0.01,
+        }
+        student_model = GPT2FeaturePrediction(config).to(device_id)
+        ddp_student = DDP(student_model, device_ids=[device_id], find_unused_parameters=True)
+        if args.rank == 0:
+            print(f"Loading student checkpoint from {args.eval_student_ckpt}")
+        student_ckpt = torch.load(args.eval_student_ckpt, map_location="cpu")
+        ddp_student.load_state_dict(student_ckpt, False)
+        ddp_student.eval()
+
     ddp_model.eval()
     eval_log_dir = None
     if args.visualize:
         eval_log_dir = 'evaluate/{}'.format(args.evaluate_from_checkpoint.split('.')[0])
-    eval_one_epoch_calvin_ddp(
+    results = eval_one_epoch_calvin_ddp(
         args=args,
         model=ddp_model,
         image_processor=image_processor,
@@ -454,8 +484,10 @@ def main():
         eval_log_dir=eval_log_dir,
         debug=args.visualize,
         reset=args.reset,
-        diverse_inst=args.diverse_inst
+        diverse_inst=args.diverse_inst,
+        student_model=ddp_student
     )
+    print("results: ", results)
 
 
 if __name__ == "__main__":

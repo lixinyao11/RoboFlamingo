@@ -4,8 +4,10 @@ import numpy as np
 from datetime import datetime
 
 class EvaluationLogger:
-    def __init__(self, output_dir="/Share/xyli/Datasets/flamingo_data/logs"):
-        # 初始化日志目录
+    def __init__(self, output_dir="/Share/xyli/Datasets/flamingo_data/logs", save_data=False):
+        self.enabled = save_data
+        if not self.enabled:
+            return
         current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = f'{output_dir}_{current_time}'
         os.makedirs(self.output_dir, exist_ok=True)
@@ -19,11 +21,15 @@ class EvaluationLogger:
 
 
     def start_sequence(self):
+        if not self.enabled:
+            return
         self.sequence_id += 1
         self.current_sequence_data = []  # 每个 sequence 开始时清空数据
 
 
     def save_sequence(self):
+        if not self.enabled:
+            return
         print("end sequence", self.sequence_id)
         # return
         file_name = f"sequence_{self.sequence_id}.hdf5"
@@ -46,6 +52,8 @@ class EvaluationLogger:
 
 
     def start_rollout(self, subtask_id, text):
+        if not self.enabled:
+            return
         self.subtask_id = subtask_id
         self.subtask_txt = text
         self.step_cnt = 0
@@ -53,6 +61,8 @@ class EvaluationLogger:
 
 
     def end_rollout(self, success):
+        if not self.enabled:
+            return
         subtask_data = {
             "sequence_id": self.sequence_id,
             "subtask_id": self.subtask_id,
@@ -71,6 +81,8 @@ class EvaluationLogger:
 
 
     def log_step(self, image, cls, state, text, mask, action, feature):
+        if not self.enabled:
+            return
         step_data = {
             "image": image,
             "image.pooled": cls,

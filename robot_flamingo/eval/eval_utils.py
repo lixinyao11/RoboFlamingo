@@ -99,9 +99,10 @@ def make_env_debug(dataset_path):
 
 
 class ModelWrapper(CalvinBaseModel):
-    def __init__(self, model, tokenizer, image_processor, cast_dtype, use_diff, history_len=None, future_act_len=-1):
+    def __init__(self, model, tokenizer, image_processor, student_model, cast_dtype, use_diff, history_len=None, future_act_len=-1, collect_data=False):
         super().__init__()
         self.model = model
+        self.student_model = student_model
         self.replan = model.module.replan
         self.decoder_type = model.module.decoder_type
         self.cast_type = cast_dtype
@@ -112,7 +113,7 @@ class ModelWrapper(CalvinBaseModel):
         self.feature_cache = None
         self.dt_feat_cache = []
         self.fusion_mode = self.model.module.fusion_mode
-        self.logger = EvaluationLogger()
+        self.logger = EvaluationLogger(save_data=collect_data)
         
         if use_diff:
             self.diffusion_model = None
@@ -313,17 +314,11 @@ class ModelWrapper(CalvinBaseModel):
                     mask = mask.repeat(2, 1)
                     action = self.model(vision_x=vision_x, lang_x=text_x, attention_mask=mask, state_tensor = state, return_feature=True)
                 else:
-                    action, vision, pooled, text_embedding = self.model(vision_x=image_x, lang_x=text_x, attention_mask=mask, vision_gripper = gripper, state_tensor = state, return_feature=True)
-                
-                # self.logger.log_step(obs["rgb_obs"]['rgb_static'], obs["rgb_obs"]['rgb_gripper'], obs['robot_obs'], 
-                #                      np.concatenate([action.logits[0].detach().cpu().numpy(), action.logits[1].detach().cpu().numpy()], axis=2), 
-                #                      action.hidden_states[-1].detach().cpu().numpy())
-                if torch.sum(mask) != mask.numel():
-                    print("mask: ", mask)
-                self.logger.log_step(vision.detach().cpu().numpy(), pooled.detach().cpu().numpy(), obs['robot_obs'], 
-                                     text_embedding.detach().cpu().numpy(), mask.detach().cpu().numpy(),
-                                     np.concatenate([action.logits[0].detach().cpu().numpy(), action.logits[1].detach().cpu().numpy()], axis=2), 
-                                     action.hidden_states[-1].detach().cpu().numpy())
+                    action, vision, pooled, text_embedding = self.model(vision_x=image_x, lang_x=text_x, attention_mask=mask, vision_gripper = gripper, state_tensor = state, return_feature=True, student_model=self.student_model)
+                    self.logger.log_step(vision.detach().cpu().numpy(), pooled.detach().cpu().numpy(), obs['robot_obs'], 
+                                        text_embedding.detach().cpu().numpy(), mask.detach().cpu().numpy(),
+                                        np.concatenate([action.logits[0].detach().cpu().numpy(), action.logits[1].detach().cpu().numpy()], axis=2), 
+                                        action.hidden_states[-1].detach().cpu().numpy())
 
                 if self.model.module.pad_length != -1:
                     if self.feature_cache is None:
@@ -588,11 +583,13 @@ def rollout(env, model, task_oracle, subtask, val_annotations, plans, debug, eva
                 img_clip = ImageSequenceClip(img_queue, fps=30)
                 img_clip.write_gif(os.path.join(eval_log_dir, f'{sequence_i}-{subtask_i}-{subtask}-succ.gif'), fps=30)
             model.logger.end_rollout(1)
+            print("success")
             return True
     if debug:
         print(colored("fail", "red"), end=" ")
         img_clip = ImageSequenceClip(img_queue, fps=30)
         img_clip.write_gif(os.path.join(eval_log_dir, f'{sequence_i}-{subtask_i}-{subtask}-fail.gif'), fps=30)
+    print("fail")
     model.logger.end_rollout(0)
     return False
 
@@ -604,7 +601,7 @@ def eval_one_epoch_calvin(args, model, dataset_path, image_processor, tokenizer,
     evaluate_policy(wrapped_model, env, 0, args.calvin_conf_path)
 
 
-def eval_one_epoch_calvin_ddp(args, model, dataset_path, image_processor, tokenizer, eval_log_dir=None, debug=False, future_act_len=-1, reset=False, diverse_inst=False):
+def eval_one_epoch_calvin_ddp(args, model, dataset_path, image_processor, tokenizer, eval_log_dir=None, debug=False, future_act_len=-1, reset=False, diverse_inst=False, student_model=None):
     print("eval_one_epoch_calvin_ddp")
     env = make_env(dataset_path)
     cast_dtype = get_cast_dtype(args.precision)
@@ -613,8 +610,8 @@ def eval_one_epoch_calvin_ddp(args, model, dataset_path, image_processor, tokeni
         hist_len = args.n_obs_steps
     elif args.pad_length != -1:
         hist_len = args.pad_length
-    wrapped_model = ModelWrapper(model, tokenizer, image_processor, cast_dtype, args.head_type=="diffusion", history_len=hist_len, future_act_len=future_act_len)
-    evaluate_policy_ddp(wrapped_model, env, 0, args.calvin_conf_path, eval_log_dir=eval_log_dir, debug=debug, reset=reset, diverse_inst=diverse_inst)
+    wrapped_model = ModelWrapper(model, tokenizer, image_processor, student_model, cast_dtype, args.head_type=="diffusion", history_len=hist_len, future_act_len=future_act_len, collect_data=args.collect_data)
+    return evaluate_policy_ddp(wrapped_model, env, 0, args.calvin_conf_path, eval_log_dir=eval_log_dir, debug=debug, reset=reset, diverse_inst=diverse_inst)
 
 
 def main():

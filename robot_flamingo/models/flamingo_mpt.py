@@ -160,6 +160,8 @@ class MPTFlamingo(nn.Module):
             self.lm_head = self.lang_encoder.lm_head
             self.lang_encoder.lm_head = nn.Identity()
 
+        self.last_feature = None
+
     def forward(
         self,
         vision_x: torch.Tensor,
@@ -173,7 +175,8 @@ class MPTFlamingo(nn.Module):
         vision_gripper = None,
         state_tensor = None,
         return_feature = False,
-        policy_mask=None
+        policy_mask=None,
+        student_model=None,
     ):
         """
         Forward pass of Flamingo.
@@ -226,16 +229,32 @@ class MPTFlamingo(nn.Module):
                     elif self.fusion_mode == 'vit_concat':
                         self._encode_history_vision_fc_post(vision_x, vision_gripper)
         
-        output = self.lang_encoder(
-            input_ids=lang_x,
-            attention_mask=attention_mask.bool(),
-            past_key_values=past_key_values,
-            use_cache=use_cache,
-            output_hidden_states=True
-        )  # CausalLMOutputWithPast
         input_embeddings = self.lang_encoder.get_input_embeddings()(lang_x)
+        output = self.lang_encoder(
+                input_ids=lang_x,
+                attention_mask=attention_mask.bool(),
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                output_hidden_states=True
+            )  # CausalLMOutputWithPast
+        if student_model:
+            text = input_embeddings # (1, L, 2048)
+            L = text.shape[1]
+            text_pool = torch.mean(text, dim=1)  # (1, 2048)
+            text = torch.cat([text_pool.unsqueeze(1), text], dim=1)  # (1, L+1, 2048)
+            image = vision_x.squeeze(1).squeeze(1).squeeze(1)  # （1，512，1024）
+            image_pool = pooled.unsqueeze(0)  # (1, 1, 1536)
+            if self.last_feature is None:
+                self.last_feature = torch.zeros_like(text).to(text.device)
+            mask = torch.ones(1, text.shape[1] + 1 + image.shape[1] + self.last_feature.shape[1])  # (1, L+L'+513=seq_len)
+            # print("last_feature shape: ", self.last_feature.shape)
+            output_hs = student_model(text, image, image_pool, self.last_feature, mask)  # (1, seq_len, 2048)
+            output_hs = output_hs[:, -L:, :]  # (1, L, 2048)
+            feature_pool = torch.mean(output_hs, dim=1)
+            self.last_feature = torch.cat([feature_pool.unsqueeze(1), output_hs], dim=1)  # (1, L+1, 2048)
+        else:
+            output_hs = output.hidden_states[-1]  # 提取最后一层的hidden_states
 
-        output_hs = output.hidden_states[-1]  # 提取最后一层的hidden_states
         output_hs = self.lm_head(output_hs, state_tensor=state_tensor, return_feature=return_feature)
         output.logits = output_hs  # 模型的输出 (action)
         

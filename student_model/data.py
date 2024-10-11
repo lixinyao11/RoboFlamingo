@@ -47,7 +47,7 @@ class MyDataset(Dataset):
 
 
 class MyIterableDataset(IterableDataset):
-    def __init__(self, dir, split='train', split_ratio=0.9, data_size=None, chunk_size=50):
+    def __init__(self, dir, split='train', split_ratio=0.9, data_size=None, chunk_size=30):
         self.data_dir = dir
         self.files = [f for f in os.listdir(dir) if f.endswith('.hdf5')]
         if data_size:
@@ -85,10 +85,14 @@ class MyIterableDataset(IterableDataset):
                         })
                 self.current_file_index += 1
             else:
-                self.current_data = []
                 break
 
     def __iter__(self):
+        return self.iter_data()
+    
+    def iter_data(self):
+        self.current_data = []
+        self.current_file_index = 0
         while self.current_file_index < len(self.files) or self.current_data:
             if not self.current_data:
                 self.load_next_chunk()
@@ -148,6 +152,7 @@ def collate_fn(batch):
 
     # (B, L+1, 2048), (B, 512, 1024), (B, 1, 1536), (B, L, 2048), (B, L+1, 2048), (B, 1+L+1+512+1+L)
     return texts, images, images_pool, features, prev_features, mask
+
 
 def load_data(config):
     data_dir = '/Share/xyli/Datasets/flamingo_data/logs_20241002_011951'
