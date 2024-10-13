@@ -1,6 +1,7 @@
 import torch
 import os
 import numpy as np
+import pickle
 import sys
 from torch import nn, optim
 import wandb
@@ -13,8 +14,8 @@ from student_model.model import GPT2FeaturePrediction
 from student_model.distributed import init_distributed_device
 
 
-def forward_pass(model, batch, criterion, device):
-    text, image, image_pool, target_feature, prev_feature, mask = [t.to(device) for t in batch]
+def forward_pass(model, batch, criterion, device, cast_dtype):
+    text, image, image_pool, target_feature, prev_feature, mask = [t.to(device, dtype=cast_dtype) for t in batch]
     predicted_feature = model(text, image, image_pool, prev_feature, mask)
     L = target_feature.shape[1]
     predicted_feature = predicted_feature[..., -L:, :]  # (B, L, 2048)
@@ -37,14 +38,29 @@ def main(config):
     device_id, rank = init_distributed_device()
     print("device_id: ", device_id)
 
-    train_dataloader, val_dataloader = load_data(config)
+    train_dataloader, val_dataloader, stats = load_data(config)
 
-    learning_rate = config["lr"]
-    num_epochs = config["num_epochs"]
     ckpt_dir = config["ckpt_dir"]
+    # save dataset stats
+    if not os.path.isdir(ckpt_dir):
+        os.makedirs(ckpt_dir)
+    data_size = config["data_size"]
+    stats_path = os.path.join(ckpt_dir, f"dataset_{data_size}_stats.pkl")
+    with open(stats_path, "wb") as f:
+        pickle.dump(stats, f)
 
-    # Instantiate the model, loss function, and optimizer
-    model = GPT2FeaturePrediction(config).to(device_id)
+    num_epochs = config["num_epochs"]
+
+    model = GPT2FeaturePrediction(config)
+    if config["precision"] == "bf16":
+        cast_dtype = torch.bfloat16
+        model = model.bfloat16()
+    elif config["precision"] == "fp16":
+        cast_dtype = torch.float16
+        model = model.half()
+    else:
+        model = model.float()
+    model = model.to(device_id)
     ddp_model = DDP(model, device_ids=[device_id], find_unused_parameters=True)
     def get_grouped_params(model):
         params_with_wd, params_without_wd = [], []
@@ -70,26 +86,7 @@ def main(config):
             {"params": [p for p in params_without_wd if p.requires_grad], "weight_decay": 0.0},
         ]
     criterion = nn.MSELoss()
-    optimizer = optim.AdamW(get_grouped_params(ddp_model), lr=learning_rate)
-
-    # if args.lr_scheduler == "linear":
-    #     lr_scheduler = get_linear_schedule_with_warmup(
-    #         optimizer,
-    #         num_warmup_steps=args.warmup_steps,
-    #         num_training_steps=total_training_steps,
-    #     )
-    # elif args.lr_scheduler == "cosine":
-    #     lr_scheduler = get_cosine_schedule_with_warmup(
-    #         optimizer,
-    #         num_warmup_steps=args.warmup_steps,
-    #         num_training_steps=total_training_steps,
-    #     )
-    # elif args.lr_scheduler == 'cosine_restart':
-    #     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-7)
-    # else:
-    #     lr_scheduler = get_constant_schedule_with_warmup(
-    #         optimizer, num_warmup_steps=args.warmup_steps
-    #     )
+    optimizer = optim.AdamW(get_grouped_params(ddp_model), lr=config["lr"])
 
     if rank == 0:
         wandb.init(
@@ -110,31 +107,32 @@ def main(config):
                 ddp_model.eval()
                 val_loss = 0.0
                 for i, batch in enumerate(val_dataloader):
-                    loss = forward_pass(ddp_model, batch, criterion, device_id)
+                    loss = forward_pass(ddp_model, batch, criterion, device_id, cast_dtype)
                     val_loss += loss.item()
                     if i % 100 == 0 and rank == 0:
                         print(f"Val batch {i}, loss: {loss.item():.4f}")
                 val_loss /= len(val_dataloader)
-            wandb.log({"val/loss": val_loss})
+            wandb.log({"val/loss": val_loss, "epoch": epoch})
             print(f"Val loss: {val_loss:.5f}")
 
         ddp_model.train()
         running_loss = 0.0
         # train_dataloader = get_data_loader(train_dataset, config)
-        for i, batch in enumerate(train_dataloader):
+        for i, batch in enumerate(tqdm(train_dataloader)):
             optimizer.zero_grad()
-            loss = forward_pass(ddp_model, batch, criterion, device_id)
+            loss = forward_pass(ddp_model, batch, criterion, device_id, cast_dtype)
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item()
             if i % 100 == 0 and rank == 0:
-                wandb.log({"loss": loss.item()})
+                # wandb.log({"loss": loss.item()})
                 print(f"Train batch {i}, loss: {loss.item():.4f}")
 
         if rank == 0:
             avg_loss = running_loss / len(train_dataloader)
             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
+            wandb.log({"train/loss": avg_loss, "epoch": epoch})
             os.makedirs(os.path.join(ckpt_dir, config["exptid"]), exist_ok=True)
             ckpt_path = os.path.join(ckpt_dir, config["exptid"], f"model_epoch_{epoch}.ckpt")
             torch.save(get_checkpoint(ddp_model), ckpt_path)
@@ -151,8 +149,9 @@ if __name__ == "__main__":
         "embed_dim": 2048,
         "feat_dim": 2048,
         "lr": 1e-4,
-        "batch_size": 6,
-        "exptid": "test_run_gpt_ddp",
+        "batch_size": 24,
+        "precision": "bf16",
+        "exptid": "gpt_ddp_train_fast",
         "data_size": 100,
         "iterable_data": True,
         "weight_decay": 0.01,
