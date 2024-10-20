@@ -25,6 +25,8 @@ class GPT2FeaturePrediction(nn.Module):
         image_pool = self.project_vision_pool(image_pool)
         prev_feature = self.project_feature(prev_feature)
         combined_input = torch.cat([text, image_pool, image, prev_feature], dim=1)  # (B, seq_L, hidden_dim)
+        B, seq_len = combined_input.shape[0], combined_input.shape[1]
+        assert mask.shape == (B, seq_len), (mask.shape, B, seq_len, text.shape, image.shape, image_pool.shape, prev_feature.shape)
         gpt2_output = self.gpt2(inputs_embeds=combined_input, attention_mask=mask).last_hidden_state
         output_feature = self.linear_out(gpt2_output)
         return output_feature

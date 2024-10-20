@@ -6,11 +6,12 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader, random_split, IterableDataset
 
 class MyDataset(Dataset):
-    def __init__(self, dir, split='train', split_ratio=0.9, data_cut=None):
+    def __init__(self, dir, norm_stats, split='train', split_ratio=0.9, data_size=None):
         self.data_dir = dir
+        self.norm_stats = norm_stats
         self.files = [f for f in os.listdir(dir) if f.endswith('.hdf5')]
-        if data_cut:
-            self.files = self.files[:data_cut]
+        if data_size:
+            self.files = self.files[:data_size]
         split_idx = int(len(self.files) * split_ratio)
         if split == 'train':
             self.files = self.files[:split_idx]
@@ -40,7 +41,9 @@ class MyDataset(Dataset):
                     image = torch.tensor(f[group]['image'][local_idx, 0, 0, 0, ...], dtype=torch.float32)  # (256+256, 1024)
                     image_pool = torch.tensor(f[group]['image.pooled'][local_idx, 0, ...], dtype=torch.float32)  # (768+768)
                     feature = torch.tensor(f[group]['features'][local_idx, 0, ...], dtype=torch.float32)  # (L, 2048)
+                    feature = (feature - self.norm_stats["feature_mean"]) / self.norm_stats["feature_std"]
                     prev_feature = torch.tensor(f[group]['features'][local_idx - 1, 0, ...], dtype=torch.float32) if local_idx > 0 else torch.zeros_like(feature)
+                    prev_feature = (prev_feature - self.norm_stats["feature_mean"]) / self.norm_stats["feature_std"]
 
                     text_pool = torch.mean(text, dim=0)  # (2048,)
                     prev_feature_pool = torch.mean(prev_feature, dim=0)  # (2048,)
@@ -68,6 +71,8 @@ class MyIterableDataset(IterableDataset):
                 for group in f.keys():
                     self.len += f[group]['text'].shape[0]
 
+        self.random_data = False
+
     def __len__(self):
         return self.len
 
@@ -76,14 +81,28 @@ class MyIterableDataset(IterableDataset):
         file_path = self.files[idx]
         with h5py.File(os.path.join(self.data_dir, file_path), 'r') as f:
             for group in f.keys():
-                data.append({
-                    "subtask": group,
-                    "length": f[group]['text'].shape[0],
-                    "text": f[group]['text'][:],
-                    "image": f[group]['image'][:],
-                    "image.pooled": f[group]['image.pooled'][:],
-                    "features": f[group]['features'][:],
-                })
+                length = f[group]['text'].shape[0]
+                text = f[group]['text'][:]
+                image = f[group]['image'][:]
+                image_pooled = f[group]['image.pooled'][:]
+                features = f[group]['features'][:]
+                if self.random_data:
+                    data.append({
+                        "length": length,
+                        "text": np.random.rand(*text.shape),
+                        "image": np.random.rand(*image.shape),
+                        "image.pooled": np.random.rand(*image_pooled.shape),
+                        "features": np.random.rand(*features.shape),
+                    })
+                else: 
+                    data.append({
+                        # "subtask": group,
+                        "length": f[group]['text'].shape[0],
+                        "text": f[group]['text'][:],
+                        "image": f[group]['image'][:],
+                        "image.pooled": f[group]['image.pooled'][:],
+                        "features": f[group]['features'][:],
+                    })
         return data
 
     def __iter__(self):
@@ -106,7 +125,8 @@ class MyIterableDataset(IterableDataset):
                     image = torch.tensor(group["image"][t, 0, 0, 0, ...], dtype=torch.float32)  # (256+256, 1024)
                     image_pool = torch.tensor(group["image.pooled"][t, 0, ...], dtype=torch.float32)  # (768+768)
                     feature = torch.tensor(group["features"][t, 0, ...], dtype=torch.float32)  # (L, 2048)
-                    feature = (feature - self.norm_stats["feature_mean"]) / self.norm_stats["feature_std"]
+                    if not self.random_data:
+                        feature = (feature - self.norm_stats["feature_mean"]) / self.norm_stats["feature_std"]
                     # if t > 0:
                     #     prev_feature = torch.tensor(group["features"][t - 1, 0, ...], dtype=torch.float32) 
                     if t == 0:
@@ -196,28 +216,50 @@ def get_norm_stats(data_dir, data_size):
 
 
 def load_data(config, num_workers=8):
-    data_dir = '/Share/xyli/Datasets/flamingo_data/logs_20241002_011951'
+    data_dir = '/Share/xyli/Datasets/flamingo_data/logs_20241002_011950'
     stats = get_norm_stats(data_dir, config["data_size"])
-    assert config["iterable_data"] == True, "Only iterable data is supported"
-    train_dataset = MyIterableDataset(data_dir, stats, split='train', data_size=config["data_size"])
-    val_dataset = MyIterableDataset(data_dir, stats, split='val', data_size=config["data_size"])
-    train_dataloader = DataLoader(
-        train_dataset, 
-        batch_size=config["batch_size"],
-        shuffle=False,
-        collate_fn=collate_fn, 
-        num_workers=num_workers,
-        prefetch_factor=config["batch_size"],
-        pin_memory=True,
-    )
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=config["batch_size"],
-        shuffle=False,
-        collate_fn=collate_fn,
-        num_workers=num_workers,
-        prefetch_factor=config["batch_size"],
-        pin_memory=True,
-    )
+
+    if config["iterable_data"]:
+        train_dataset = MyIterableDataset(data_dir, stats, split='train', data_size=config["data_size"])
+        val_dataset = MyIterableDataset(data_dir, stats, split='val', data_size=config["data_size"])
+        train_dataloader = DataLoader(
+            train_dataset, 
+            batch_size=config["batch_size"],
+            shuffle=False,
+            collate_fn=collate_fn, 
+            num_workers=num_workers,
+            prefetch_factor=config["batch_size"],
+            pin_memory=False,
+        )
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=config["batch_size"],
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=num_workers,
+            prefetch_factor=config["batch_size"],
+            pin_memory=False,
+        )
+    else:
+        train_dataset = MyDataset(data_dir, stats, split='train', data_size=config["data_size"])
+        val_dataset = MyDataset(data_dir, stats, split='val', data_size=config["data_size"])
+        train_dataloader = DataLoader(
+            train_dataset, 
+            batch_size=config["batch_size"],
+            shuffle=True,
+            collate_fn=collate_fn, 
+            num_workers=num_workers,
+            prefetch_factor=config["batch_size"],
+            pin_memory=False,
+        )
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=config["batch_size"],
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=num_workers,
+            prefetch_factor=config["batch_size"],
+            pin_memory=False,
+        )
 
     return train_dataloader, val_dataloader, stats

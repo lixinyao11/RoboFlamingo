@@ -13,8 +13,14 @@ from student_model.data import load_data
 from student_model.model import GPT2FeaturePrediction
 from student_model.distributed import init_distributed_device
 
+from transformers import (
+    get_constant_schedule_with_warmup,
+    get_cosine_schedule_with_warmup,
+    get_linear_schedule_with_warmup,
+)
 
-def forward_pass(model, batch, criterion, device, cast_dtype):
+
+def forward_pass(model, batch, criterion, device, cast_dtype=torch.float32):
     text, image, image_pool, target_feature, prev_feature, mask = [t.to(device, dtype=cast_dtype) for t in batch]
     predicted_feature = model(text, image, image_pool, prev_feature, mask)
     L = target_feature.shape[1]
@@ -35,9 +41,6 @@ def get_checkpoint(model):
 
 
 def main(config):
-    device_id, rank = init_distributed_device()
-    print("device_id: ", device_id)
-
     train_dataloader, val_dataloader, stats = load_data(config)
 
     ckpt_dir = config["ckpt_dir"]
@@ -59,9 +62,18 @@ def main(config):
         cast_dtype = torch.float16
         model = model.half()
     else:
+        cast_dtype = torch.float32
         model = model.float()
-    model = model.to(device_id)
-    ddp_model = DDP(model, device_ids=[device_id], find_unused_parameters=True)
+
+    if config["device"] == "cpu":
+        device_id = "cpu"
+        model = model.cpu()
+    else:
+        device_id, rank = init_distributed_device()
+        print("device_id: ", device_id)
+        model = model.to(device_id)
+        model = DDP(model, device_ids=[device_id], find_unused_parameters=True)
+
     def get_grouped_params(model):
         params_with_wd, params_without_wd = [], []
 
@@ -85,10 +97,30 @@ def main(config):
             {"params": [p for p in params_with_wd if p.requires_grad], "weight_decay": config["weight_decay"]},
             {"params": [p for p in params_without_wd if p.requires_grad], "weight_decay": 0.0},
         ]
+    
     criterion = nn.MSELoss()
-    optimizer = optim.AdamW(get_grouped_params(ddp_model), lr=config["lr"])
+    optimizer = optim.AdamW(get_grouped_params(model), lr=config["lr"])
+    total_training_steps = len(train_dataloader) * num_epochs // config["batch_size"]
+    if config["lr_scheduler"] == "linear":
+        lr_scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=0.1 * total_training_steps,
+            num_training_steps=total_training_steps,
+        )
+    elif config["lr_scheduler"] == "cosine":
+        lr_scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=0.1 * total_training_steps,
+            num_training_steps=total_training_steps,
+        )
+    elif config["lr_scheduler"] == 'cosine_restart':
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-7)
+    else:
+        lr_scheduler = get_constant_schedule_with_warmup(
+            optimizer, num_warmup_steps=0.1 * total_training_steps
+        )
 
-    if rank == 0:
+    if config["device"] =="cpu" or rank == 0:
         wandb.init(
             project="student_flamingo",
             name=config["exptid"],
@@ -97,17 +129,17 @@ def main(config):
         )
         wandb.config.update(config)
 
-    ddp_model.train()
+    model.train()
     for epoch in tqdm(range(num_epochs)):
         print(f"\nEpoch {epoch}")
 
         if epoch % 5 == 0 and epoch > 0 and rank == 0:
             # val_dataloader = get_data_loader(val_dataset, config)
             with torch.inference_mode():
-                ddp_model.eval()
+                model.eval()
                 val_loss = 0.0
                 for i, batch in enumerate(val_dataloader):
-                    loss = forward_pass(ddp_model, batch, criterion, device_id, cast_dtype)
+                    loss = forward_pass(model, batch, criterion, device_id, cast_dtype)
                     val_loss += loss.item()
                     if i % 100 == 0 and rank == 0:
                         print(f"Val batch {i}, loss: {loss.item():.4f}")
@@ -115,27 +147,28 @@ def main(config):
             wandb.log({"val/loss": val_loss, "epoch": epoch})
             print(f"Val loss: {val_loss:.5f}")
 
-        ddp_model.train()
+        model.train()
         running_loss = 0.0
         # train_dataloader = get_data_loader(train_dataset, config)
         for i, batch in enumerate(tqdm(train_dataloader)):
             optimizer.zero_grad()
-            loss = forward_pass(ddp_model, batch, criterion, device_id, cast_dtype)
+            loss = forward_pass(model, batch, criterion, device_id, cast_dtype)
             loss.backward()
             optimizer.step()
+            lr_scheduler.step()
 
             running_loss += loss.item()
-            if i % 100 == 0 and rank == 0:
+            if i % 100 == 0 and (device_id == 'cpu' or rank == 0):
                 # wandb.log({"loss": loss.item()})
                 print(f"Train batch {i}, loss: {loss.item():.4f}")
 
-        if rank == 0:
+        if device_id == 'cpu' or rank == 0:
             avg_loss = running_loss / len(train_dataloader)
             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
             wandb.log({"train/loss": avg_loss, "epoch": epoch})
             os.makedirs(os.path.join(ckpt_dir, config["exptid"]), exist_ok=True)
             ckpt_path = os.path.join(ckpt_dir, config["exptid"], f"model_epoch_{epoch}.ckpt")
-            torch.save(get_checkpoint(ddp_model), ckpt_path)
+            torch.save(get_checkpoint(model), ckpt_path)
 
     # wandb.finish()
 
@@ -149,11 +182,13 @@ if __name__ == "__main__":
         "embed_dim": 2048,
         "feat_dim": 2048,
         "lr": 1e-4,
-        "batch_size": 24,
-        "precision": "bf16",
-        "exptid": "gpt_ddp_train_fast",
-        "data_size": 100,
-        "iterable_data": True,
+        "lr_scheduler": "constant",
+        "batch_size": 16,  # 4
+        "precision": "float32",
+        "exptid": "gpt_D",
+        "data_size": 100,  # 20
+        "iterable_data": False,
         "weight_decay": 0.01,
+        "device": "cuda",
     }
     main(config)
