@@ -7,6 +7,7 @@ import sys
 import random
 sys.path.append("/home/xyli/Code/RoboFlamingo")
 from robot_flamingo.eval.eval_utils import eval_one_epoch_calvin_ddp
+from robot_flamingo.eval.process_data import process_calvin_data_ddp
 from student_model.model import GPT2FeaturePrediction
 from torch.distributed.elastic.multiprocessing.errors import record
 
@@ -474,20 +475,29 @@ def main():
     eval_log_dir = None
     if args.visualize:
         eval_log_dir = 'evaluate/{}'.format(args.evaluate_from_checkpoint.split('.')[0])
-    results = eval_one_epoch_calvin_ddp(
+    
+    process_calvin_data_ddp(
         args=args,
-        model=ddp_model,
+        wrapped_model=ddp_model,
+        dataset_path=args.calvin_dataset,
         image_processor=image_processor,
         tokenizer=tokenizer,
-        dataset_path=args.calvin_dataset,
-        future_act_len=args.future_act_len,
-        eval_log_dir=eval_log_dir,
-        debug=args.visualize,
-        reset=args.reset,
-        diverse_inst=args.diverse_inst,
-        student_model=ddp_student
     )
-    print("results: ", results)
+    
+    # results = eval_one_epoch_calvin_ddp(
+    #     args=args,
+    #     model=ddp_model,
+    #     image_processor=image_processor,
+    #     tokenizer=tokenizer,
+    #     dataset_path=args.calvin_dataset,
+    #     future_act_len=args.future_act_len,
+    #     eval_log_dir=eval_log_dir,
+    #     debug=args.visualize,
+    #     reset=args.reset,
+    #     diverse_inst=args.diverse_inst,
+    #     student_model=ddp_student
+    # )
+    # print("results: ", results)
 
 
 if __name__ == "__main__":

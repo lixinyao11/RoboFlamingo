@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime
 
 class EvaluationLogger:
-    def __init__(self, output_dir="/Share/xyli/Datasets/flamingo_data/logs", save_data=False):
+    def __init__(self, output_dir="/Share/xyli/Datasets/flamingo_data/D", save_data=False):
         self.enabled = save_data
         if not self.enabled:
             return
@@ -59,14 +59,23 @@ class EvaluationLogger:
         self.step_cnt = 0
         self.current_subtask_data = []  
 
+    
+    def save_rollout(self, file_name):
+        if not self.enabled:
+            return
+        # save as npz
+        file_path = os.path.join(self.output_dir, f'{file_name}.npz')
+        np.savez(file_path, **self.current_subtask_data)
+        self.current_sequence_data = []
+
 
     def end_rollout(self, success):
         if not self.enabled:
             return
         subtask_data = {
-            "sequence_id": self.sequence_id,
+            # "sequence_id": self.sequence_id,
             "subtask_id": self.subtask_id,
-            "success": success,
+            # "success": success,
             "steps": self.step_cnt,
             "lang": self.subtask_txt
         }
@@ -78,6 +87,7 @@ class EvaluationLogger:
         for key in keys:
             subtask_data[key] = np.stack(subtask_data[key])
         self.current_sequence_data.append(subtask_data)
+        self.current_subtask_data = subtask_data
 
 
     def log_step(self, image, cls, state, text, mask, action, feature):
@@ -88,7 +98,7 @@ class EvaluationLogger:
             "image.pooled": cls,
             "state": state,
             "text": text,
-            "mask": mask,
+            # "mask": mask,
             "action.logits": action,
             # "action.logits": action[0][0],  # (7,)
             "features": feature,

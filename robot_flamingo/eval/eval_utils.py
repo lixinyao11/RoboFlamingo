@@ -171,7 +171,7 @@ class ModelWrapper(CalvinBaseModel):
             self.model.module.lm_head.hidden_state = None
             self.model.module.lm_head.history_memory = []
 
-    def step(self, obs, goal, get_action=True):
+    def step(self, obs, goal, get_action=True, process_data=False):
         """
         Args:
             obs: environment observations
@@ -181,7 +181,10 @@ class ModelWrapper(CalvinBaseModel):
         """
 
         # preprocess image
-        image = obs["rgb_obs"]['rgb_static']
+        if process_data:
+            image = obs['rgb_static']
+        else:
+            image = obs["rgb_obs"]['rgb_static']
         image = Image.fromarray(image)
         image_x = self.image_process_fn([image])
         # expand image dimension
@@ -204,7 +207,10 @@ class ModelWrapper(CalvinBaseModel):
         state = None
 
         if self.model.module.use_gripper:
-            gripper = obs["rgb_obs"]['rgb_gripper']
+            if process_data:
+                gripper = obs['rgb_gripper']
+            else:
+                gripper = obs["rgb_obs"]['rgb_gripper']
             gripper = Image.fromarray(gripper)
             gripper = self.image_process_fn([gripper])
             # expand image dimension
